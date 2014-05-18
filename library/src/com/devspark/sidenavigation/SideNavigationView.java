@@ -1,7 +1,10 @@
 package com.devspark.sidenavigation;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 
+import android.widget.*;
 import org.xmlpull.v1.XmlPullParser;
 
 import android.content.Context;
@@ -12,13 +15,7 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.animation.AnimationUtils;
-import android.widget.AdapterView;
 import android.widget.AdapterView.OnItemClickListener;
-import android.widget.BaseAdapter;
-import android.widget.ImageView;
-import android.widget.LinearLayout;
-import android.widget.ListView;
-import android.widget.TextView;
 
 /**
  * View of displaying side navigation.
@@ -32,10 +29,18 @@ public class SideNavigationView extends LinearLayout {
     private LinearLayout navigationMenu;
     private ListView listView;
     private View outsideView;
+    private HashMap<Integer, View> viewCache = new HashMap<Integer, View>();
 
     private ISideNavigationCallback callback;
     private ArrayList<SideNavigationItem> menuItems;
     private Mode mMode = Mode.LEFT;
+    private List<ToggleButton>[] buttonMenuList;
+    private int currentOpenExtraDialog = -1;
+
+    public void setCurrentOpenExtraDialog(int currentOpenExtraDialog)  {
+        this.currentOpenExtraDialog = currentOpenExtraDialog;
+        ((BaseAdapter)listView.getAdapter()).notifyDataSetChanged();
+    }
 
     public static enum Mode {
         LEFT, RIGHT
@@ -72,6 +77,10 @@ public class SideNavigationView extends LinearLayout {
         initView();
     }
 
+    public View getCacheViewItemByPosition(int position) {
+        return viewCache.get(position);
+    }
+
     /**
      * Initialization layout of side menu.
      */
@@ -104,9 +113,9 @@ public class SideNavigationView extends LinearLayout {
             @Override
             public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
                 if (callback != null) {
-                    callback.onSideNavigationItemClick(menuItems.get(position).getId());
+                    SideNavigationItem item = (SideNavigationItem)menuItems.get(position);
+                    callback.onSideNavigationItemClick(item.getId());
                 }
-                hideMenu();
             }
         });
     }
@@ -130,6 +139,14 @@ public class SideNavigationView extends LinearLayout {
         if (menuItems != null && menuItems.size() > 0) {
             listView.setAdapter(new SideNavigationAdapter());
         }
+    }
+
+    public void setHideItemContent(List<ToggleButton> buttonMenuList[]) {
+        this.buttonMenuList = buttonMenuList;
+    }
+
+    public ListAdapter getAdapter() {
+        return listView.getAdapter();
     }
 
     /**
@@ -236,6 +253,7 @@ public class SideNavigationView extends LinearLayout {
      */
     private void parseXml(int menu) {
         menuItems = new ArrayList<SideNavigationItem>();
+
         try {
             XmlResourceParser xrp = getResources().getXml(menu);
             xrp.next();
@@ -247,22 +265,26 @@ public class SideNavigationView extends LinearLayout {
                         String textId = xrp.getAttributeValue(
                                 "http://schemas.android.com/apk/res/android",
                                 "title");
-                        String iconId = xrp.getAttributeValue(
-                                "http://schemas.android.com/apk/res/android",
-                                "icon");
                         String resId = xrp.getAttributeValue(
                                 "http://schemas.android.com/apk/res/android",
                                 "id");
                         SideNavigationItem item = new SideNavigationItem();
                         item.setId(Integer.valueOf(resId.replace("@", "")));
                         item.setText(resourceIdToString(textId));
-                        if (iconId != null) {
-                            try {
-                                item.setIcon(Integer.valueOf(iconId.replace("@", "")));
-                            } catch (NumberFormatException e) {
-                                Log.d(LOG_TAG, "Item " + item.getId() + " not have icon");
-                            }
-                        }
+                        item.setType(0);
+                        menuItems.add(item);
+                    }
+                    if (elemName.equals("hide_item")) {
+                        String textId = xrp.getAttributeValue(
+                                "http://schemas.android.com/apk/res/android",
+                                "title");
+                        String resId = xrp.getAttributeValue(
+                                "http://schemas.android.com/apk/res/android",
+                                "id");
+                        SideNavigationItem item = new SideNavigationItem();
+                        item.setId(Integer.valueOf(resId.replace("@", "")));
+                        item.setText(resourceIdToString(textId));
+                        item.setType(1);
                         menuItems.add(item);
                     }
                 }
@@ -276,7 +298,7 @@ public class SideNavigationView extends LinearLayout {
     /**
      * Convert resource ID to String.
      * 
-     * @param text
+     * @param
      * @return
      */
     private String resourceIdToString(String resId) {
@@ -302,43 +324,90 @@ public class SideNavigationView extends LinearLayout {
 
         @Override
         public Object getItem(int position) {
-            return null;
+            return menuItems.get(position);
         }
 
         @Override
         public long getItemId(int position) {
-            return 0;
+            SideNavigationItem item = menuItems.get(position);
+            return item.getId();
+        }
+
+        @Override
+        public int getViewTypeCount() {
+            return 2;
+        }
+
+        @Override
+        public int getItemViewType(int position) {
+            return menuItems.get(position).getType();
         }
 
         @Override
         public View getView(int position, View convertView, ViewGroup parent) {
             final ViewHolder holder;
+            SideNavigationItem item = menuItems.get(position);
+
             if (convertView == null) {
-                convertView = inflater.inflate(R.layout.side_navigation_item, null);
                 holder = new ViewHolder();
-                holder.text = (TextView) convertView.findViewById(R.id.side_navigation_item_text);
-                holder.icon = (ImageView) convertView.findViewById(R.id.side_navigation_item_icon);
+
+                if (item.getType() == 0) {
+                    convertView = inflater.inflate(R.layout.side_navigation_item, null);
+                    holder.text = (TextView) convertView.findViewById(R.id.side_navigation_item_text);
+                }
+                if (item.getType() == 1) {
+                    convertView = inflater.inflate(R.layout.side_navigation_hide_item, null);
+                    holder.verticalLL = (LinearLayout) convertView.findViewById(R.id.extra);
+                }
+
                 convertView.setTag(holder);
+                viewCache.put(position, convertView);
             } else {
                 holder = (ViewHolder) convertView.getTag();
             }
 
-            SideNavigationItem item = menuItems.get(position);
-            holder.text.setText(menuItems.get(position).getText());
-            if (item.getIcon() != SideNavigationItem.DEFAULT_ICON_VALUE) {
-                holder.icon.setVisibility(View.VISIBLE);
-                holder.icon.setImageResource(menuItems.get(position).getIcon());
-            } else {
-                holder.icon.setVisibility(View.GONE);
+            if (item.getType() == 0) {
+                holder.text.setText(item.getText());
             }
+            else {
+                if (position != currentOpenExtraDialog) {
+                    convertView.setVisibility(View.INVISIBLE);
+                    ViewGroup.LayoutParams lp = holder.verticalLL.getLayoutParams();
+                    lp.height = 0;
+                    holder.verticalLL.setLayoutParams(lp);
+                }
+                else {
+                    holder.verticalLL.removeAllViews();
+                    int btnCount = buttonMenuList[currentOpenExtraDialog].size();
+                    int nowCount = 0;
+                    while (nowCount < btnCount) {
+                        LinearLayout horizontalLL = new LinearLayout(getContext());
+                        horizontalLL.setOrientation(LinearLayout.HORIZONTAL);
+
+                        for (int columnIndex = 0; columnIndex < 5; columnIndex++) {
+                            if (nowCount == btnCount) break;
+
+                            Button btn = buttonMenuList[currentOpenExtraDialog].get(nowCount);
+                            if (btn.getParent() != null)
+                                ((ViewGroup)btn.getParent()).removeView(btn);
+                            horizontalLL.addView(btn);
+                            nowCount++;
+                        }
+                        holder.verticalLL.addView(horizontalLL);
+                        ViewGroup.LayoutParams lp = holder.verticalLL.getLayoutParams();
+                        lp.height = LayoutParams.WRAP_CONTENT;
+                        holder.verticalLL.setLayoutParams(lp);
+                    }
+                    convertView.setVisibility(View.VISIBLE);
+                }
+            }
+
             return convertView;
         }
 
         class ViewHolder {
             TextView text;
-            ImageView icon;
+            LinearLayout verticalLL;
         }
-
     }
-
 }
